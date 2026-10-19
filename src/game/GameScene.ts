@@ -17,12 +17,6 @@ interface FallingItem {
   kind: ItemKind;
 }
 
-/**
- * Котик бегает по полу, сверху падают рыбки и рыбьи скелеты.
- * Рыбка — +1 к счёту. Скелет — котик пугается и теряет жизнь.
- * Жизни кончились — Game Over, пробел начинает заново.
- * Чем больше рыбок поймано, тем быстрее всё падает.
- */
 export class GameScene extends Phaser.Scene {
   private cat!: Phaser.GameObjects.Container;
   private items: FallingItem[] = [];
@@ -37,7 +31,7 @@ export class GameScene extends Phaser.Scene {
   private lives = START_LIVES;
   private isPlaying = false;
   private isGameOver = false;
-
+  private isPaused = false;
   // Не сбрасывается в create(), поэтому рекорд сохраняется между попытками.
   private bestScore = 0;
 
@@ -54,6 +48,7 @@ export class GameScene extends Phaser.Scene {
     this.lives = START_LIVES;
     this.isPlaying = false;
     this.isGameOver = false;
+    this.isPaused = false;
 
     this.add
       .text(width / 2, 24, 'Стрелки / A D — бег. Лови рыбку, костей бойся!', {
@@ -100,6 +95,10 @@ export class GameScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as Record<'left' | 'right', Phaser.Input.Keyboard.Key>;
     this.restartKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    // Пауза: P или Esc переключают игра ⇄ пауза.
+    // Слушаем каждое нажатие напрямую: некоторые браузеры «съедают» отпускание Esc.
+    this.input.keyboard.on('keydown-P', (event: KeyboardEvent) => this.onPauseKey(event));
+    this.input.keyboard.on('keydown-ESC', (event: KeyboardEvent) => this.onPauseKey(event));
 
     // Правила показываем только при первом запуске, после Game Over — сразу игра.
     if (data.skipIntro) {
@@ -123,6 +122,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    if (this.isPaused) return;
+
     const seconds = delta / 1000;
     let dx = 0;
 
@@ -142,18 +143,15 @@ export class GameScene extends Phaser.Scene {
     // Точки треугольника задаются от левого верхнего угла (0, 0).
     const earLeft = this.add.triangle(-14, -92, 0, 18, 9, 0, 18, 18, fur);
     const earRight = this.add.triangle(14, -92, 0, 18, 9, 0, 18, 18, fur);
-
-    // Хвост 
+    // Хвост лежит на полу рядом с котиком.
     const tail = this.add.ellipse(30, -6, 44, 12, fur);
     const body = this.add.ellipse(0, -28, 56, 56, fur);
     const head = this.add.circle(0, -70, 24, fur);
     const eyeLeft = this.add.circle(-9, -72, 3.5, 0x1f2937);
     const eyeRight = this.add.circle(9, -72, 3.5, 0x1f2937);
-
-    // Нос
+    // Носик — перевёрнутый треугольник.
     const nose = this.add.triangle(0, -62, 0, 0, 7, 0, 3.5, 4, 0xf9a8d4);
-
-    // Рот
+    // Ротик в форме «ω».
     const mouth = [
       this.catLine(0, -60, -3, -57, 0x1f2937),
       this.catLine(-3, -57, -6, -59, 0x1f2937),
@@ -181,12 +179,12 @@ export class GameScene extends Phaser.Scene {
     ]);
   }
 
-  // Линия для усов и рта
+  // Тонкая линия для усов и рта: от точки (x1, y1) до (x2, y2).
   private catLine(x1: number, y1: number, x2: number, y2: number, color: number): Phaser.GameObjects.Line {
     return this.add.line(0, 0, x1, y1, x2, y2, color).setOrigin(0).setLineWidth(1.5);
   }
 
-  // Рыбка 
+  // Рыбка головой вправо, хвост слева от тела.
   private createFish(x: number, y: number): Phaser.GameObjects.Container {
     const color = 0x7dd3fc;
     const tail = this.add.triangle(-22, 0, 0, 0, 14, 10, 0, 20, color);
@@ -195,7 +193,7 @@ export class GameScene extends Phaser.Scene {
     return this.add.container(x, y, [tail, body, eye]);
   }
 
-  // Рыбий скелет
+  // Рыбий скелет: голова с глазницей, хребет, рёбра и хвост.
   private createBones(x: number, y: number): Phaser.GameObjects.Container {
     const bone = 0xe5e7eb;
     const tail = this.add.triangle(-26, 0, 0, 0, 10, 8, 0, 16, bone);
@@ -218,6 +216,26 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  // Пауза работает только во время игры; зажатая клавиша не переключает много раз.
+  private onPauseKey(event: KeyboardEvent): void {
+    if (!this.isPlaying || event.repeat) return;
+    this.togglePause();
+  }
+
+  // Останавливает или продолжает игру: таймер появления предметов и анимации.
+  private togglePause(): void {
+    this.isPaused = !this.isPaused;
+    if (this.spawnTimer) this.spawnTimer.paused = this.isPaused;
+
+    if (this.isPaused) {
+      this.tweens.pauseAll();
+      this.messageText.setText('Пауза\n\nP / Esc — продолжить');
+    } else {
+      this.tweens.resumeAll();
+      this.messageText.setText('');
+    }
+  }
+
   private currentFallSpeed(): number {
     return Math.min(FALL_SPEED + this.score * FALL_SPEED_PER_FISH, MAX_FALL_SPEED);
   }
@@ -232,7 +250,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateItems(seconds: number): void {
-
     // Идём с конца, чтобы безопасно удалять элементы из массива.
     const speed = this.currentFallSpeed();
 
@@ -276,7 +293,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // Надпись над котиком, которая всплывает и исчезает
+  // Надпись над котиком, которая всплывает и исчезает.
   private showPopup(label: string, color: string): void {
     const popup = this.add
       .text(this.cat.x, this.cat.y - 110, label, {
@@ -295,7 +312,7 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // Котик мигает, когда пугается скелета
+  // Котик мигает, когда пугается скелета.
   private blinkCat(): void {
     this.tweens.add({
       targets: this.cat,
@@ -316,8 +333,7 @@ export class GameScene extends Phaser.Scene {
     this.isPlaying = false;
     this.isGameOver = true;
     this.spawnTimer?.remove();
-
-    // Убираем оставшиеся предметы, чтобы они не закрывали надпись
+    // Убираем оставшиеся предметы, чтобы они не закрывали надпись.
     this.items.forEach((item) => item.view.destroy());
     this.items = [];
     this.bestScore = Math.max(this.bestScore, this.score);
