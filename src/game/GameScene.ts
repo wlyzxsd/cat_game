@@ -1,22 +1,14 @@
 import Phaser from 'phaser';
+import { GAME_CONFIG } from './gameConfig.ts';
 
-const CAT_SPEED = 380;
+// Разметка экрана (не баланс): высота пола и ширина полоски прогресса.
 const GROUND_Y = 580;
-const START_LIVES = 3;
-const CATCH_DISTANCE = 50;
-const SPAWN_DELAY_MS = 900;
-const FALL_SPEED = 200;
-const FALL_SPEED_PER_FISH = 8; // каждая пойманная рыбка ускоряет падение
-const MAX_FALL_SPEED = 520;
-const BONES_CHANCE = 0.3;
-
-// Фаза 2: после 10 пойманных рыбок меняются два параметра, управление прежнее.
-const PHASE_2_AT_FISH = 10;
 const PROGRESS_BAR_WIDTH = 220;
-const PHASE_2_SPAWN_DELAY_MS = 550; // предметы появляются чаще (было 900)
-const PHASE_2_BONES_CHANCE = 0.45; // скелетов больше (было 30%)
 
 type ItemKind = 'fish' | 'bones';
+
+// Одно состояние игры вместо трёх флагов isPlaying / isGameOver / isPaused.
+type GameState = 'intro' | 'playing' | 'paused' | 'gameover';
 
 interface FallingItem {
   view: Phaser.GameObjects.Container;
@@ -34,12 +26,10 @@ export class GameScene extends Phaser.Scene {
   private messageText!: Phaser.GameObjects.Text;
   private spawnTimer?: Phaser.Time.TimerEvent;
   private score = 0;
-  private lives = START_LIVES;
-  private isPlaying = false;
-  private isGameOver = false;
-  private isPaused = false;
+  private lives = GAME_CONFIG.startLives;
+  private gameState: GameState = 'intro';
   private phase = 1;
-  private bonesChance = BONES_CHANCE;
+  private bonesChance = GAME_CONFIG.bonesChance;
   private phaseText!: Phaser.GameObjects.Text;
   private progressBar!: Phaser.GameObjects.Container;
   private progressFill!: Phaser.GameObjects.Rectangle;
@@ -60,12 +50,10 @@ export class GameScene extends Phaser.Scene {
     // При scene.restart() конструктор не вызывается, поэтому сбрасываем здесь.
     this.items = [];
     this.score = 0;
-    this.lives = START_LIVES;
-    this.isPlaying = false;
-    this.isGameOver = false;
-    this.isPaused = false;
+    this.lives = GAME_CONFIG.startLives;
+    this.gameState = 'intro';
     this.phase = 1;
-    this.bonesChance = BONES_CHANCE;
+    this.bonesChance = GAME_CONFIG.bonesChance;
 
     // Красноватый фон фазы 2: создаётся первым, чтобы лежать позади всего. Пока невидим.
     this.phaseTint = this.add.rectangle(0, 0, width, height, 0x9f1239).setOrigin(0).setAlpha(0);
@@ -147,9 +135,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    if (!this.isPlaying) {
+    if (this.gameState === 'intro' || this.gameState === 'gameover') {
       if (Phaser.Input.Keyboard.JustDown(this.restartKey)) {
-        if (this.isGameOver) {
+        if (this.gameState === 'gameover') {
           this.scene.restart({ skipIntro: true });
         } else {
           this.startGame();
@@ -158,7 +146,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (this.isPaused) return;
+    if (this.gameState === 'paused') return;
 
     const seconds = delta / 1000;
     let dx = 0;
@@ -166,7 +154,7 @@ export class GameScene extends Phaser.Scene {
     if (this.cursors.left.isDown || this.wasd.left.isDown) dx -= 1;
     if (this.cursors.right.isDown || this.wasd.right.isDown) dx += 1;
 
-    this.cat.x += dx * CAT_SPEED * seconds;
+    this.cat.x += dx * GAME_CONFIG.catSpeed * seconds;
 
     this.keepCatOnScreen();
     this.updateItems(seconds);
@@ -243,10 +231,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private startGame(): void {
-    this.isPlaying = true;
+    this.gameState = 'playing';
     this.messageText.setText('');
     this.pauseButton.setVisible(true);
-    this.startSpawnTimer(SPAWN_DELAY_MS);
+    this.startSpawnTimer(GAME_CONFIG.spawnDelayMs);
   }
 
   private startSpawnTimer(delay: number): void {
@@ -261,8 +249,8 @@ export class GameScene extends Phaser.Scene {
   // Показывает прогресс до фазы 2: текст «N / 10» и полоску.
   private updatePhaseText(): void {
     if (this.phase === 1) {
-      this.phaseText.setText(`Фаза 1 · поймай ${PHASE_2_AT_FISH} рыбок для фазы 2: ${this.score} / ${PHASE_2_AT_FISH}`);
-      this.progressFill.setScale(this.score / PHASE_2_AT_FISH, 1);
+      this.phaseText.setText(`Фаза 1 · поймай ${GAME_CONFIG.phase2Score} рыбок для фазы 2: ${this.score} / ${GAME_CONFIG.phase2Score}`);
+      this.progressFill.setScale(this.score / GAME_CONFIG.phase2Score, 1);
     } else {
       this.phaseText.setText('Фаза 2 · скелетов больше, падают чаще').setColor('#fda4af');
       this.progressBar.setVisible(false);
@@ -272,8 +260,8 @@ export class GameScene extends Phaser.Scene {
   // Фаза 2: меняются два параметра — частота появления и доля скелетов.
   private startPhase2(): void {
     this.phase = 2;
-    this.bonesChance = PHASE_2_BONES_CHANCE;
-    this.startSpawnTimer(PHASE_2_SPAWN_DELAY_MS);
+    this.bonesChance = GAME_CONFIG.phase2BonesChance;
+    this.startSpawnTimer(GAME_CONFIG.phase2SpawnDelayMs);
     this.showPhase2Banner();
   }
 
@@ -293,7 +281,7 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
     const subtitle = this.add
-      .text(0, 50, `${PHASE_2_AT_FISH} рыбок поймано! Скелетов больше, всё падает чаще`, {
+      .text(0, 50, `${GAME_CONFIG.phase2Score} рыбок поймано! Скелетов больше, всё падает чаще`, {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '22px',
         color: '#ffffff',
@@ -322,27 +310,31 @@ export class GameScene extends Phaser.Scene {
     this.playIcon = this.add.triangle(2, 0, 0, 0, 16, 9, 0, 18, color).setVisible(false);
 
     background.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-      if (this.isPlaying) this.togglePause();
+      this.togglePause();
     });
 
     // Кнопка видна только во время игры.
     return this.add.container(x, y, [background, this.pauseIcon, this.playIcon]).setVisible(false);
   }
 
-  // Пауза работает только во время игры; зажатая клавиша не переключает много раз.
+  // Зажатая клавиша не переключает паузу много раз.
   private onPauseKey(event: KeyboardEvent): void {
-    if (!this.isPlaying || event.repeat) return;
+    if (event.repeat) return;
     this.togglePause();
   }
 
   // Останавливает или продолжает игру: таймер появления предметов и анимации.
   private togglePause(): void {
-    this.isPaused = !this.isPaused;
-    if (this.spawnTimer) this.spawnTimer.paused = this.isPaused;
-    this.pauseIcon.setVisible(!this.isPaused);
-    this.playIcon.setVisible(this.isPaused);
+    // Пауза возможна только во время игры: проверка в одном месте.
+    if (this.gameState !== 'playing' && this.gameState !== 'paused') return;
 
-    if (this.isPaused) {
+    this.gameState = this.gameState === 'paused' ? 'playing' : 'paused';
+    const isPaused = this.gameState === 'paused';
+    if (this.spawnTimer) this.spawnTimer.paused = isPaused;
+    this.pauseIcon.setVisible(!isPaused);
+    this.playIcon.setVisible(isPaused);
+
+    if (isPaused) {
       this.tweens.pauseAll();
       this.messageText.setText('Пауза\n\nP / Esc — продолжить');
     } else {
@@ -352,7 +344,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private currentFallSpeed(): number {
-    return Math.min(FALL_SPEED + this.score * FALL_SPEED_PER_FISH, MAX_FALL_SPEED);
+    return Math.min(GAME_CONFIG.fallSpeed + this.score * GAME_CONFIG.fallSpeedPerFish, GAME_CONFIG.maxFallSpeed);
   }
 
   private spawnItem(): void {
@@ -379,14 +371,14 @@ export class GameScene extends Phaser.Scene {
         item.view.y,
       );
 
-      if (distance <= CATCH_DISTANCE) {
+      if (distance <= GAME_CONFIG.catchDistance) {
         this.removeItem(i);
         this.onCatch(item);
       } else if (item.view.y > GROUND_Y) {
         this.removeItem(i);
       }
 
-      if (this.isGameOver) return;
+      if (this.gameState === 'gameover') return;
     }
   }
 
@@ -396,7 +388,7 @@ export class GameScene extends Phaser.Scene {
       this.scoreText.setText(`Рыбок: ${this.score}`);
       this.showPopup('+1', '#fde047');
       // Прогресс: набрали нужное число рыбок — наступает фаза 2.
-      if (this.phase === 1 && this.score >= PHASE_2_AT_FISH) {
+      if (this.phase === 1 && this.score >= GAME_CONFIG.phase2Score) {
         this.startPhase2();
       }
       this.updatePhaseText();
@@ -450,8 +442,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private endGame(): void {
-    this.isPlaying = false;
-    this.isGameOver = true;
+    this.gameState = 'gameover';
     this.pauseButton.setVisible(false);
     this.spawnTimer?.remove();
     // Убираем оставшиеся предметы, чтобы они не закрывали надпись.
