@@ -10,8 +10,9 @@ const FALL_SPEED_PER_FISH = 8; // каждая пойманная рыбка у�
 const MAX_FALL_SPEED = 520;
 const BONES_CHANCE = 0.3;
 
-// Фаза 2: через 15 секунд игры меняются два параметра, управление прежнее.
-const PHASE_2_AT_MS = 15000;
+// Фаза 2: после 10 пойманных рыбок меняются два параметра, управление прежнее.
+const PHASE_2_AT_FISH = 10;
+const PROGRESS_BAR_WIDTH = 220;
 const PHASE_2_SPAWN_DELAY_MS = 550; // предметы появляются чаще (было 900)
 const PHASE_2_BONES_CHANCE = 0.45; // скелетов больше (было 30%)
 
@@ -38,9 +39,10 @@ export class GameScene extends Phaser.Scene {
   private isGameOver = false;
   private isPaused = false;
   private phase = 1;
-  private phaseTimeMs = 0; // время игры без пауз, для перехода в фазу 2
   private bonesChance = BONES_CHANCE;
   private phaseText!: Phaser.GameObjects.Text;
+  private progressBar!: Phaser.GameObjects.Container;
+  private progressFill!: Phaser.GameObjects.Rectangle;
   private phaseTint!: Phaser.GameObjects.Rectangle;
   private pauseButton!: Phaser.GameObjects.Container;
   private pauseIcon!: Phaser.GameObjects.Container;
@@ -63,7 +65,6 @@ export class GameScene extends Phaser.Scene {
     this.isGameOver = false;
     this.isPaused = false;
     this.phase = 1;
-    this.phaseTimeMs = 0;
     this.bonesChance = BONES_CHANCE;
 
     // Красноватый фон фазы 2: создаётся первым, чтобы лежать позади всего. Пока невидим.
@@ -102,6 +103,11 @@ export class GameScene extends Phaser.Scene {
         color: '#c4b5fd',
       })
       .setOrigin(0.5, 0);
+
+    // Полоска прогресса до фазы 2: заполняется с каждой пойманной рыбкой.
+    const barBack = this.add.rectangle(0, 0, PROGRESS_BAR_WIDTH, 8, 0x3b2a55).setOrigin(0, 0.5);
+    this.progressFill = this.add.rectangle(0, 0, PROGRESS_BAR_WIDTH, 8, 0xfde047).setOrigin(0, 0.5);
+    this.progressBar = this.add.container(width / 2 - PROGRESS_BAR_WIDTH / 2, 82, [barBack, this.progressFill]);
     this.updatePhaseText();
 
     this.pauseButton = this.createPauseButton(width - 40, 40);
@@ -153,8 +159,6 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.isPaused) return;
-
-    this.updatePhase(delta);
 
     const seconds = delta / 1000;
     let dx = 0;
@@ -254,21 +258,14 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // Считает время игры и включает фазу 2 через PHASE_2_AT_MS.
-  private updatePhase(delta: number): void {
-    this.phaseTimeMs += delta;
-    if (this.phase === 1 && this.phaseTimeMs >= PHASE_2_AT_MS) {
-      this.startPhase2();
-    }
-    this.updatePhaseText();
-  }
-
+  // Показывает прогресс до фазы 2: текст «N / 10» и полоску.
   private updatePhaseText(): void {
     if (this.phase === 1) {
-      const secondsLeft = Math.ceil((PHASE_2_AT_MS - this.phaseTimeMs) / 1000);
-      this.phaseText.setText(`Фаза 1 · до фазы 2: ${secondsLeft} с`);
+      this.phaseText.setText(`Фаза 1 · поймай ${PHASE_2_AT_FISH} рыбок для фазы 2: ${this.score} / ${PHASE_2_AT_FISH}`);
+      this.progressFill.setScale(this.score / PHASE_2_AT_FISH, 1);
     } else {
       this.phaseText.setText('Фаза 2 · скелетов больше, падают чаще').setColor('#fda4af');
+      this.progressBar.setVisible(false);
     }
   }
 
@@ -296,7 +293,7 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
     const subtitle = this.add
-      .text(0, 50, 'Скелетов больше, всё падает чаще!', {
+      .text(0, 50, `${PHASE_2_AT_FISH} рыбок поймано! Скелетов больше, всё падает чаще`, {
         fontFamily: 'system-ui, sans-serif',
         fontSize: '22px',
         color: '#ffffff',
@@ -398,6 +395,11 @@ export class GameScene extends Phaser.Scene {
       this.score += 1;
       this.scoreText.setText(`Рыбок: ${this.score}`);
       this.showPopup('+1', '#fde047');
+      // Прогресс: набрали нужное число рыбок — наступает фаза 2.
+      if (this.phase === 1 && this.score >= PHASE_2_AT_FISH) {
+        this.startPhase2();
+      }
+      this.updatePhaseText();
       return;
     }
 
