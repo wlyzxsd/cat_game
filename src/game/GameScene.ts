@@ -10,6 +10,11 @@ const FALL_SPEED_PER_FISH = 8; // каждая пойманная рыбка у�
 const MAX_FALL_SPEED = 520;
 const BONES_CHANCE = 0.3;
 
+// Фаза 2: через 15 секунд игры меняются два параметра, управление прежнее.
+const PHASE_2_AT_MS = 15000;
+const PHASE_2_SPAWN_DELAY_MS = 550; // предметы появляются чаще (было 900)
+const PHASE_2_BONES_CHANCE = 0.45; // скелетов больше (было 30%)
+
 type ItemKind = 'fish' | 'bones';
 
 interface FallingItem {
@@ -32,6 +37,14 @@ export class GameScene extends Phaser.Scene {
   private isPlaying = false;
   private isGameOver = false;
   private isPaused = false;
+  private phase = 1;
+  private phaseTimeMs = 0; // время игры без пауз, для перехода в фазу 2
+  private bonesChance = BONES_CHANCE;
+  private phaseText!: Phaser.GameObjects.Text;
+  private phaseTint!: Phaser.GameObjects.Rectangle;
+  private pauseButton!: Phaser.GameObjects.Container;
+  private pauseIcon!: Phaser.GameObjects.Container;
+  private playIcon!: Phaser.GameObjects.Triangle;
   // Не сбрасывается в create(), поэтому рекорд сохраняется между попытками.
   private bestScore = 0;
 
@@ -49,6 +62,12 @@ export class GameScene extends Phaser.Scene {
     this.isPlaying = false;
     this.isGameOver = false;
     this.isPaused = false;
+    this.phase = 1;
+    this.phaseTimeMs = 0;
+    this.bonesChance = BONES_CHANCE;
+
+    // Красноватый фон фазы 2: создаётся первым, чтобы лежать позади всего. Пока невидим.
+    this.phaseTint = this.add.rectangle(0, 0, width, height, 0x9f1239).setOrigin(0).setAlpha(0);
 
     this.add
       .text(width / 2, 24, 'Стрелки / A D — бег. Лови рыбку, костей бойся!', {
@@ -75,6 +94,17 @@ export class GameScene extends Phaser.Scene {
         color: '#fda4af',
       })
       .setOrigin(1, 0);
+
+    this.phaseText = this.add
+      .text(width / 2, 52, '', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '16px',
+        color: '#c4b5fd',
+      })
+      .setOrigin(0.5, 0);
+    this.updatePhaseText();
+
+    this.pauseButton = this.createPauseButton(width - 40, 40);
 
     this.messageText = this.add
       .text(width / 2, height / 2 - 40, '', {
@@ -123,6 +153,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.isPaused) return;
+
+    this.updatePhase(delta);
 
     const seconds = delta / 1000;
     let dx = 0;
@@ -209,11 +241,95 @@ export class GameScene extends Phaser.Scene {
   private startGame(): void {
     this.isPlaying = true;
     this.messageText.setText('');
+    this.pauseButton.setVisible(true);
+    this.startSpawnTimer(SPAWN_DELAY_MS);
+  }
+
+  private startSpawnTimer(delay: number): void {
+    this.spawnTimer?.remove();
     this.spawnTimer = this.time.addEvent({
-      delay: SPAWN_DELAY_MS,
+      delay,
       loop: true,
       callback: () => this.spawnItem(),
     });
+  }
+
+  // Считает время игры и включает фазу 2 через PHASE_2_AT_MS.
+  private updatePhase(delta: number): void {
+    this.phaseTimeMs += delta;
+    if (this.phase === 1 && this.phaseTimeMs >= PHASE_2_AT_MS) {
+      this.startPhase2();
+    }
+    this.updatePhaseText();
+  }
+
+  private updatePhaseText(): void {
+    if (this.phase === 1) {
+      const secondsLeft = Math.ceil((PHASE_2_AT_MS - this.phaseTimeMs) / 1000);
+      this.phaseText.setText(`Фаза 1 · до фазы 2: ${secondsLeft} с`);
+    } else {
+      this.phaseText.setText('Фаза 2 · скелетов больше, падают чаще').setColor('#fda4af');
+    }
+  }
+
+  // Фаза 2: меняются два параметра — частота появления и доля скелетов.
+  private startPhase2(): void {
+    this.phase = 2;
+    this.bonesChance = PHASE_2_BONES_CHANCE;
+    this.startSpawnTimer(PHASE_2_SPAWN_DELAY_MS);
+    this.showPhase2Banner();
+  }
+
+  // Красивое объявление: вспышка, фон краснеет, крупная надпись появляется и исчезает.
+  private showPhase2Banner(): void {
+    const { width } = this.scale;
+
+    this.cameras.main.flash(300, 255, 120, 140);
+    this.tweens.add({ targets: this.phaseTint, alpha: 0.25, duration: 1200 });
+
+    const title = this.add
+      .text(0, 0, 'ФАЗА 2', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '64px',
+        fontStyle: 'bold',
+        color: '#fda4af',
+      })
+      .setOrigin(0.5);
+    const subtitle = this.add
+      .text(0, 50, 'Скелетов больше, всё падает чаще!', {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '22px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+    const banner = this.add.container(width / 2, 170, [title, subtitle]).setScale(0.5).setAlpha(0);
+
+    this.tweens.add({ targets: banner, scale: 1, alpha: 1, duration: 350, ease: 'Back.easeOut' });
+    this.tweens.add({
+      targets: banner,
+      alpha: 0,
+      delay: 2000,
+      duration: 500,
+      onComplete: () => banner.destroy(),
+    });
+  }
+
+  // Кнопка паузы в правом верхнем углу: «❚❚» во время игры, «▶» на паузе.
+  private createPauseButton(x: number, y: number): Phaser.GameObjects.Container {
+    const color = 0xe9d5ff;
+    const background = this.add.rectangle(0, 0, 44, 44, 0x3b2a55).setStrokeStyle(2, color, 0.6);
+    this.pauseIcon = this.add.container(0, 0, [
+      this.add.rectangle(-6, 0, 6, 18, color),
+      this.add.rectangle(6, 0, 6, 18, color),
+    ]);
+    this.playIcon = this.add.triangle(2, 0, 0, 0, 16, 9, 0, 18, color).setVisible(false);
+
+    background.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+      if (this.isPlaying) this.togglePause();
+    });
+
+    // Кнопка видна только во время игры.
+    return this.add.container(x, y, [background, this.pauseIcon, this.playIcon]).setVisible(false);
   }
 
   // Пауза работает только во время игры; зажатая клавиша не переключает много раз.
@@ -226,6 +342,8 @@ export class GameScene extends Phaser.Scene {
   private togglePause(): void {
     this.isPaused = !this.isPaused;
     if (this.spawnTimer) this.spawnTimer.paused = this.isPaused;
+    this.pauseIcon.setVisible(!this.isPaused);
+    this.playIcon.setVisible(this.isPaused);
 
     if (this.isPaused) {
       this.tweens.pauseAll();
@@ -243,7 +361,7 @@ export class GameScene extends Phaser.Scene {
   private spawnItem(): void {
     const x = Phaser.Math.Between(40, this.scale.width - 40);
     const y = 70;
-    const kind: ItemKind = Math.random() < BONES_CHANCE ? 'bones' : 'fish';
+    const kind: ItemKind = Math.random() < this.bonesChance ? 'bones' : 'fish';
     const view = kind === 'fish' ? this.createFish(x, y) : this.createBones(x, y);
 
     this.items.push({ view, kind });
@@ -332,6 +450,7 @@ export class GameScene extends Phaser.Scene {
   private endGame(): void {
     this.isPlaying = false;
     this.isGameOver = true;
+    this.pauseButton.setVisible(false);
     this.spawnTimer?.remove();
     // Убираем оставшиеся предметы, чтобы они не закрывали надпись.
     this.items.forEach((item) => item.view.destroy());
