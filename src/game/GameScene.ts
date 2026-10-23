@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_CONFIG } from './gameConfig.ts';
+import { GAME_CONFIG } from './gameConfig';
 
 // Разметка экрана (не баланс): высота пола и ширина полоски прогресса.
 const GROUND_Y = 580;
